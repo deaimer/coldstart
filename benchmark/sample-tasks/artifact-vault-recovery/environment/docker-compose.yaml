@@ -1,0 +1,27 @@
+services:
+  main:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: "127.0.0.1"
+      PGPORT: "5432"
+      PGDATABASE: vault
+      PGUSER: vault
+      PGPASSWORD: vault
+      VAULT_API_CONFIG: /app/config/api.json
+      VAULT_WORKER_CONFIG: /app/config/worker.json
+
+  postgres:
+    build:
+      context: ./postgres
+    environment:
+      POSTGRES_DB: vault
+      POSTGRES_USER: vault
+      POSTGRES_PASSWORD: vault
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vault -d vault"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s

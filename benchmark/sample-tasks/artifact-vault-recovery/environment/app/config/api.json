@@ -1,0 +1,5 @@
+{
+  "listen_address": "127.0.0.1:8080",
+  "storage_root": "/var/lib/artifact-vault/blobs",
+  "staging_root": "/var/lib/artifact-vault/staging"
+}

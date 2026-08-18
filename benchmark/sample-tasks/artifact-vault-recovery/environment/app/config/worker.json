@@ -1,0 +1,5 @@
+{
+  "storage_root": "/srv/artifact-vault/blobs",
+  "staging_root": "/var/lib/artifact-vault/staging",
+  "poll_interval_ms": 100
+}

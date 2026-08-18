@@ -1,30 +1,38 @@
 schema_version = "1.4"
-artifacts = []
+artifacts = ["/app/coldstart-report.json"]
 
 [task]
 name = "Deaimer/artifact-vault-recovery"
-version = "1.0.0"
-description = ""
-authors = []
-keywords = []
+version = "0.1.0"
+description = "Repair a stateful Go artifact registry after an incomplete migration and configuration drift."
+authors = [{ name = "Deaimer", email = "ms.awan@deaimer.com" }]
+keywords = ["coldstart", "go", "postgresql", "reliability", "stateful-repair"]
 
 [metadata]
+category = "software-engineering"
+difficulty = "hard"
+languages = ["Go", "SQL", "POSIX shell"]
+coldstart_dimensions = ["functional", "durability", "state_safety", "evidence", "integrity"]
+expert_time_estimate_hours = 3.0
 
 [verifier]
 timeout_sec = 600.0
-collect = []
-
-[verifier.env]
+user = "root"
 
 [agent]
-timeout_sec = 600.0
+timeout_sec = 3600.0
+user = "root"
 
 [environment]
-network_mode = "public"
-build_timeout_sec = 600.0
-os = "linux"
-mcp_servers = []
+network_mode = "no-network"
+build_timeout_sec = 1200.0
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
 
-[environment.env]
-
-[solution.env]
+[environment.healthcheck]
+command = "curl -fsS http://127.0.0.1:8080/health/live"
+interval_sec = 2.0
+timeout_sec = 10.0
+start_period_sec = 10.0
+retries = 30
