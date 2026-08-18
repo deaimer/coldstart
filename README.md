@@ -29,6 +29,7 @@ coldstart/
 ├── .gitignore
 ├── pyproject.toml
 ├── src/coldctl/
+├── tests/
 ├── docs/
 ├── benchmark/sample-tasks/
 ├── schemas/
@@ -73,6 +74,23 @@ After implementing the task's Oracle solution and verifier, run:
 ```bash
 uv run coldctl oracle benchmark/sample-tasks/artifact-vault-recovery --runs 5
 ```
+
+## Evaluation results
+
+After running Harbor jobs, ingest them into a normalized local results store
+and generate reports:
+
+```bash
+uv run coldctl results ingest jobs/2026-08-18__18-28-15
+uv run coldctl results list-runs
+uv run coldctl results list-trials --task artifact-vault-recovery
+uv run coldctl reports task --task artifact-vault-recovery \
+  --system gpt-5.6-terra__terminus-2 --visibility public --format json
+```
+
+See [`docs/results.md`](docs/results.md) for the data model, ingestion
+workflow, public/private data policy, and reproducibility guarantees. API
+keys are never read, printed, or stored by this system.
 
 ## Development rule
 

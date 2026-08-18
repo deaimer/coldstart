@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldstart.deaimer.com/schemas/task_system_aggregate.schema.json",
+  "title": "ColdStart task/system aggregate",
+  "description": "Aggregate metrics for one (task, system) pair across all ingested trials. strict_pass_rate is computed only from coldstart_pass; dimension_averages are diagnostic and must never be blended into strict_pass_rate.",
+  "type": "object",
+  "required": [
+    "task",
+    "system",
+    "attempts",
+    "scored_attempts",
+    "passes",
+    "failures",
+    "strict_pass_rate",
+    "dimension_averages",
+    "exception_count",
+    "cost",
+    "runtime",
+    "tokens",
+    "failed_check_counts"
+  ],
+  "properties": {
+    "task": { "type": "string" },
+    "system": { "type": "string", "description": "'<model>__<agent>' identifier." },
+    "task_versions": { "type": "array", "items": { "type": "string" } },
+    "benchmark_versions": { "type": "array", "items": { "type": "string" } },
+    "attempts": { "type": "integer", "minimum": 0 },
+    "scored_attempts": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Attempts with a non-null coldstart_pass value (excludes unscored infrastructure exceptions)."
+    },
+    "passes": { "type": "integer", "minimum": 0 },
+    "failures": { "type": "integer", "minimum": 0 },
+    "strict_pass_rate": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "passes / scored_attempts, computed only from coldstart_pass."
+    },
+    "dimension_averages": {
+      "type": "object",
+      "description": "Mean of each of the five diagnostic dimensions (functional, durability, state_safety, integrity, evidence) across trials where present.",
+      "additionalProperties": { "type": "number" }
+    },
+    "exception_count": { "type": "integer", "minimum": 0 },
+    "cost": {
+      "type": "object",
+      "required": ["total_usd", "average_usd", "sample_count"],
+      "properties": {
+        "total_usd": { "type": ["number", "null"] },
+        "average_usd": { "type": ["number", "null"] },
+        "sample_count": { "type": "integer" }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["median_sec", "sample_count"],
+      "properties": {
+        "median_sec": { "type": ["number", "null"] },
+        "sample_count": { "type": "integer" }
+      }
+    },
+    "tokens": {
+      "type": "object",
+      "properties": {
+        "total_input": { "type": ["integer", "null"] },
+        "total_output": { "type": ["integer", "null"] },
+        "total_cached": { "type": ["integer", "null"] }
+      }
+    },
+    "failed_check_counts": {
+      "type": "object",
+      "description": "Number of trials in which each named verifier check failed.",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    }
+  }
+}

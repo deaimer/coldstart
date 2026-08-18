@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldstart.deaimer.com/schemas/private_report.schema.json",
+  "title": "ColdStart private task report",
+  "description": "Full-detail report for one (task, system) pair, for internal/reviewer use only. May include individual attempts, failed verifier-check names, job/trial identifiers, raw artifact references, and exception details.",
+  "type": "object",
+  "required": ["schema", "visibility", "task", "system", "generated_at", "aggregate", "attempts"],
+  "properties": {
+    "schema": { "const": "coldstart.private_report.v1" },
+    "visibility": { "const": "private" },
+    "task": { "type": "string" },
+    "system": { "type": "string" },
+    "system_configuration": { "type": "object" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "evaluation_date_range": {
+      "type": "object",
+      "properties": {
+        "from": { "type": ["string", "null"] },
+        "to": { "type": ["string", "null"] }
+      }
+    },
+    "aggregate": { "$ref": "task_system_aggregate.schema.json" },
+    "attempts": {
+      "type": "array",
+      "items": { "$ref": "trial.schema.json" }
+    }
+  }
+}

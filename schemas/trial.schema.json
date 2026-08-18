@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldstart.deaimer.com/schemas/trial.schema.json",
+  "title": "ColdStart normalized trial export",
+  "description": "One ingested Harbor trial, normalized. Trajectory contents are never included here, only provenance (path + sha256) for the trajectory artifact.",
+  "type": "object",
+  "required": [
+    "trial_key",
+    "trial_name",
+    "run_key",
+    "strict_pass",
+    "coldstart_pass",
+    "dimension_scores",
+    "failed_checks",
+    "is_infra_exception",
+    "artifacts"
+  ],
+  "properties": {
+    "trial_key": { "type": "string", "description": "Stable identifier: '<run_key>::<trial_name>'." },
+    "trial_name": { "type": "string" },
+    "run_key": { "type": "string", "description": "Harbor job directory name." },
+    "trial_uuid": { "type": ["string", "null"] },
+    "started_at": { "type": ["string", "null"], "format": "date-time" },
+    "finished_at": { "type": ["string", "null"], "format": "date-time" },
+    "runtime_sec": { "type": ["number", "null"] },
+    "runtime_basis": {
+      "type": ["string", "null"],
+      "enum": ["run", "trial", null],
+      "description": "Which timestamps runtime_sec was derived from."
+    },
+    "strict_pass": {
+      "type": ["boolean", "null"],
+      "description": "Derived only from the coldstart_pass reward key."
+    },
+    "coldstart_pass": { "type": ["number", "null"] },
+    "dimension_scores": {
+      "type": "object",
+      "description": "Every reward key returned by the verifier for this trial (diagnostic dimensions plus coldstart_pass and any future/unknown keys). Unknown keys are preserved verbatim.",
+      "additionalProperties": { "type": ["number", "null"] }
+    },
+    "failed_checks": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Names of verifier checks that did not pass for this trial."
+    },
+    "cost_usd": { "type": ["number", "null"] },
+    "tokens": {
+      "type": "object",
+      "properties": {
+        "input": { "type": ["integer", "null"] },
+        "output": { "type": ["integer", "null"] },
+        "cached": { "type": ["integer", "null"] }
+      }
+    },
+    "is_infra_exception": {
+      "type": "boolean",
+      "description": "True when Harbor recorded a structured exception_info for this trial, distinguishing an infrastructure failure from a genuine (scored) task failure."
+    },
+    "exception": {
+      "type": ["object", "null"],
+      "properties": {
+        "type": { "type": ["string", "null"] },
+        "message": { "type": ["string", "null"] },
+        "occurred_at": { "type": ["string", "null"] }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Provenance only: source path and SHA-256 hash, never file contents.",
+      "items": {
+        "type": "object",
+        "required": ["kind", "source_path", "sha256"],
+        "properties": {
+          "kind": { "type": "string" },
+          "source_path": { "type": "string" },
+          "sha256": { "type": ["string", "null"] },
+          "size_bytes": { "type": ["integer", "null"] }
+        }
+      }
+    }
+  }
+}

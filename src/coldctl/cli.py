@@ -9,6 +9,7 @@ from pathlib import Path
 import typer
 
 from coldctl import __version__
+from coldctl.results.cli import reports_app, results_app
 
 app = typer.Typer(
     name="coldctl",
@@ -17,6 +18,8 @@ app = typer.Typer(
 )
 task_app = typer.Typer(help="Create and manage ColdStart tasks.", no_args_is_help=True)
 app.add_typer(task_app, name="task")
+app.add_typer(results_app, name="results")
+app.add_typer(reports_app, name="reports")
 
 
 def _require_command(command: str) -> None:

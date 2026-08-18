@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldstart.deaimer.com/schemas/public_report.schema.json",
+  "title": "ColdStart public task report",
+  "description": "Redacted, shareable report for one (task, system) pair. Must never contain local filesystem paths, individual hidden-check names, oracle/verifier content, trajectory contents, API information, private task contents, or secret/environment-variable values.",
+  "type": "object",
+  "required": [
+    "schema",
+    "visibility",
+    "task",
+    "system",
+    "generated_at",
+    "attempts",
+    "strict_pass_rate",
+    "dimension_averages",
+    "cost",
+    "runtime",
+    "failure_totals"
+  ],
+  "properties": {
+    "schema": { "const": "coldstart.public_report.v1" },
+    "visibility": { "const": "public" },
+    "task": { "type": "string" },
+    "system": { "type": "string" },
+    "system_configuration": {
+      "type": "object",
+      "properties": {
+        "model_name": { "type": ["string", "null"] },
+        "model_provider": { "type": ["string", "null"] },
+        "agent_name": { "type": ["string", "null"] },
+        "agent_version": { "type": ["string", "null"] },
+        "agent_kwargs": { "type": "object" }
+      }
+    },
+    "benchmark_versions": { "type": "array", "items": { "type": "string" } },
+    "task_versions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Task content digests only (e.g. 'sha256:...'), never filesystem paths."
+    },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "evaluation_date_range": {
+      "type": "object",
+      "properties": {
+        "from": { "type": ["string", "null"] },
+        "to": { "type": ["string", "null"] }
+      }
+    },
+    "attempts": { "type": "integer", "minimum": 0 },
+    "scored_attempts": { "type": "integer", "minimum": 0 },
+    "strict_pass_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "dimension_averages": {
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "total_usd": { "type": ["number", "null"] },
+        "average_usd": { "type": ["number", "null"] },
+        "sample_count": { "type": "integer" }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "median_sec": { "type": ["number", "null"] },
+        "sample_count": { "type": "integer" }
+      }
+    },
+    "tokens": {
+      "type": "object",
+      "properties": {
+        "total_input": { "type": ["integer", "null"] },
+        "total_output": { "type": ["integer", "null"] },
+        "total_cached": { "type": ["integer", "null"] }
+      }
+    },
+    "failure_totals": {
+      "type": "object",
+      "required": ["failures", "exceptions"],
+      "description": "High-level failure counts only. Must not decompose into individual hidden-check names.",
+      "properties": {
+        "failures": { "type": "integer", "minimum": 0 },
+        "exceptions": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "not": {
+    "anyOf": [
+      { "required": ["attempts_detail"] },
+      { "required": ["failed_check_counts"] },
+      { "required": ["source_path"] },
+      { "required": ["trajectory"] }
+    ]
+  }
+}

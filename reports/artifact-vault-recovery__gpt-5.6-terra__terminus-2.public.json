@@ -1,0 +1,56 @@
+{
+  "schema": "coldstart.public_report.v1",
+  "visibility": "public",
+  "task": "artifact-vault-recovery",
+  "system": "gpt-5.6-terra__terminus-2",
+  "system_configuration": {
+    "model_name": "gpt-5.6-terra",
+    "model_provider": "openai",
+    "agent_name": "terminus-2",
+    "agent_version": "2.0.0",
+    "agent_kwargs": {
+      "max_turns": 30,
+      "reasoning_effort": "medium",
+      "use_responses_api": true
+    }
+  },
+  "benchmark_versions": [
+    "0.1.0"
+  ],
+  "task_versions": [
+    "sha256:895fc348146724ba84e780529c821f538e45aac21b484f4354480bfead91195c"
+  ],
+  "generated_at": "2026-08-18T14:48:35.011181+00:00",
+  "evaluation_date_range": {
+    "from": "2026-08-18",
+    "to": "2026-08-18"
+  },
+  "attempts": 5,
+  "scored_attempts": 5,
+  "strict_pass_rate": 0.2,
+  "dimension_averages": {
+    "functional": 0.9,
+    "durability": 0.8,
+    "state_safety": 0.7333333333333333,
+    "integrity": 0.6,
+    "evidence": 0.8
+  },
+  "cost": {
+    "total_usd": 1.4773508,
+    "average_usd": 0.29547016,
+    "sample_count": 5
+  },
+  "runtime": {
+    "median_sec": 264.203051,
+    "sample_count": 5
+  },
+  "tokens": {
+    "total_input": 1800684,
+    "total_output": 61218,
+    "total_cached": 0
+  },
+  "failure_totals": {
+    "failures": 4,
+    "exceptions": 0
+  }
+}

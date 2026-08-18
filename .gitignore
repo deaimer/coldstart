@@ -17,6 +17,7 @@ jobs/
 logs/
 artifacts/
 results/private/
+.coldstart/
 
 .idea/
 .vscode/
