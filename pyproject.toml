@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.25,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coldstart-benchmark"
+version = "0.1.0"
+description = "ColdStart benchmark tooling for reliable AI-agent evaluation"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [
+  { name = "Deaimer", email = "ms.awan@deaimer.com" },
+]
+dependencies = [
+  "typer>=0.12,<1",
+]
+
+[project.urls]
+Homepage = "https://coldstart.deaimer.com"
+Repository = "https://github.com/deaimer/coldstart"
+
+[project.scripts]
+coldctl = "coldctl.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coldctl"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
