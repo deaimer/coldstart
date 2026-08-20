@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldstart.deaimer.com/schemas/run_state.schema.json",
+  "title": "ColdStart evaluation run state",
+  "description": "Mutable run state, rewritten atomically on every change. Never contains a credential value.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "status",
+    "trials",
+    "completed_trial_ids",
+    "pending_trial_ids",
+    "invalid_infrastructure_attempts",
+    "retry_counts",
+    "actual_cost_usd",
+    "harbor_job_dirs",
+    "ingestion_status",
+    "report_status"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer" },
+    "run_id": { "type": "string" },
+    "status": { "enum": ["planned", "running", "completed", "failed", "paused", "cancelled"] },
+    "trials": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["trial_id", "status", "attempts", "harbor_job_dirs", "ingested"],
+        "properties": {
+          "trial_id": { "type": "string" },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "passed",
+              "failed",
+              "infra_invalid_retry_scheduled",
+              "infra_invalid_exhausted",
+              "auth_error_paused",
+              "unknown_paused"
+            ]
+          },
+          "attempts": { "type": "integer", "minimum": 0 },
+          "harbor_job_dirs": { "type": "array", "items": { "type": "string" } },
+          "outcome_reason": { "type": ["string", "null"] },
+          "evidence": { "type": ["string", "null"] },
+          "cost_usd": { "type": ["number", "null"] },
+          "ingested": { "type": "boolean" },
+          "last_updated": { "type": "string" }
+        }
+      }
+    },
+    "completed_trial_ids": { "type": "array", "items": { "type": "string" } },
+    "pending_trial_ids": { "type": "array", "items": { "type": "string" } },
+    "invalid_infrastructure_attempts": { "type": "integer", "minimum": 0 },
+    "retry_counts": { "type": "object", "additionalProperties": { "type": "integer" } },
+    "actual_cost_usd": { "type": "number" },
+    "harbor_job_dirs": { "type": "object" },
+    "ingestion_status": { "type": "object", "additionalProperties": { "type": "boolean" } },
+    "report_status": {
+      "type": "object",
+      "properties": {
+        "private": { "$ref": "#/$defs/report_status" },
+        "public": { "$ref": "#/$defs/report_status" }
+      }
+    },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" },
+    "last_event": { "type": ["object", "null"] }
+  },
+  "$defs": {
+    "report_status": {
+      "type": "object",
+      "properties": {
+        "generated": { "type": "boolean" },
+        "path": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

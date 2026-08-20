@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldstart.deaimer.com/schemas/evaluation_config.schema.json",
+  "title": "ColdStart evaluation configuration",
+  "description": "A `coldctl eval` configuration file. Never contains a credential value -- only the name of an environment variable to read one from at execution time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "description", "benchmark_version", "status", "tasks", "systems", "execution"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "benchmark_version": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["official", "development"] },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "systems": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/system" }
+    },
+    "execution": { "$ref": "#/$defs/execution" },
+    "reports": { "$ref": "#/$defs/reports" }
+  },
+  "$defs": {
+    "system": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "agent", "environment", "api_key_env", "trials_per_task"],
+      "properties": {
+        "name": { "type": "string" },
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1, "description": "Exact model identifier, e.g. 'openai/gpt-5.6-terra'." },
+        "agent": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string", "minLength": 1 },
+        "agent_kwargs": {
+          "type": "object",
+          "description": "Generic agent keyword arguments, e.g. reasoning_effort, use_responses_api, max_turns."
+        },
+        "api_key_env": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Name of the environment variable holding the credential. Never a credential value."
+        },
+        "trials_per_task": { "type": "integer", "minimum": 1 },
+        "estimated_cost_per_trial_usd": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_budget_usd"],
+      "properties": {
+        "max_concurrent_trials": { "type": "integer", "minimum": 1, "default": 1 },
+        "max_infra_retries": { "type": "integer", "minimum": 0, "default": 0 },
+        "max_budget_usd": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "report_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "path": { "type": "string" }
+      }
+    },
+    "reports": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "private": { "$ref": "#/$defs/report_target" },
+        "public": { "$ref": "#/$defs/report_target" }
+      }
+    }
+  }
+}

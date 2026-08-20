@@ -92,6 +92,25 @@ See [`docs/results.md`](docs/results.md) for the data model, ingestion
 workflow, public/private data policy, and reproducibility guarantees. API
 keys are never read, printed, or stored by this system.
 
+## Automated evaluation runner
+
+`coldctl eval` plans and executes multi-trial, budget-limited evaluations
+from a versioned YAML config, then ingests and reports on them automatically
+via the Phase 1 results system:
+
+```bash
+uv run coldctl eval validate configs/evaluations/artifact-vault-recovery.terra.yaml
+uv run coldctl eval plan configs/evaluations/artifact-vault-recovery.terra.yaml
+uv run coldctl eval run configs/evaluations/artifact-vault-recovery.terra.yaml --yes
+uv run coldctl eval status <run-id>
+uv run coldctl eval resume <run-id> --yes   # after an interruption
+```
+
+See [`docs/evaluation-runner.md`](docs/evaluation-runner.md) for the
+configuration format, credential handling, budget controls, retry
+classification, and the run lifecycle. API keys are never read, printed, or
+stored by this system.
+
 ## Development rule
 
 Do not commit model API keys, customer data, private tasks, private tests, or production Oracle solutions to this repository. No author may approve their own task.

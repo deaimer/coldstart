@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldstart.deaimer.com/schemas/event_entry.schema.json",
+  "title": "ColdStart evaluation run event",
+  "description": "One line of a run's append-only events.jsonl log. Harbor argument vectors are redacted before being written here.",
+  "type": "object",
+  "required": ["schema_version", "event_type", "run_id", "timestamp"],
+  "properties": {
+    "schema_version": { "type": "integer" },
+    "event_type": {
+      "enum": [
+        "run_created",
+        "trial_started",
+        "trial_completed",
+        "trial_failed",
+        "trial_infra_retry",
+        "trial_infra_exhausted",
+        "trial_auth_error",
+        "trial_unknown_paused",
+        "run_paused",
+        "run_finished"
+      ]
+    },
+    "run_id": { "type": "string" },
+    "trial_id": { "type": "string" },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "outcome": { "enum": ["passed", "failed", "infra_invalid", "auth_error", "unknown"] },
+    "reason": { "type": "string" },
+    "evidence": { "type": "string", "description": "Redacted evidence text; never a raw credential." },
+    "harbor_argv": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Redacted Harbor command arguments (secret-shaped values masked)."
+    },
+    "harbor_job_dir": { "type": "string" },
+    "status": { "type": "string" },
+    "trial_count": { "type": "integer" },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}

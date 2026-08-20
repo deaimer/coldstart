@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://coldstart.deaimer.com/schemas/run_manifest.schema.json",
+  "title": "ColdStart evaluation run manifest",
+  "description": "Immutable, frozen at run creation and never rewritten. Never contains a credential value.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "config_hash",
+    "config_snapshot",
+    "git_commit",
+    "git_dirty",
+    "benchmark_version",
+    "task_hashes",
+    "trials",
+    "systems",
+    "created_at",
+    "expected_trial_count",
+    "configured_budget_usd",
+    "cost_estimate"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer" },
+    "run_id": { "type": "string" },
+    "config_path": { "type": ["string", "null"] },
+    "config_hash": { "type": "string" },
+    "config_snapshot": { "type": "object", "description": "Sanitized config content; never a credential value." },
+    "git_commit": { "type": ["string", "null"] },
+    "git_dirty": { "type": "boolean" },
+    "git_available": { "type": "boolean" },
+    "unverified": { "type": "boolean" },
+    "benchmark_version": { "type": "string" },
+    "task_hashes": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "trials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["trial_id", "task_path", "task_name", "system_key", "attempt"],
+        "properties": {
+          "trial_id": { "type": "string" },
+          "task_path": { "type": "string" },
+          "task_name": { "type": "string" },
+          "system_key": { "type": "string" },
+          "provider": { "type": "string" },
+          "model": { "type": "string" },
+          "agent": { "type": "string" },
+          "environment": { "type": "string" },
+          "agent_kwargs": { "type": "object" },
+          "api_key_env": { "type": "string" },
+          "attempt": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "systems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "system_key": { "type": "string" },
+          "provider": { "type": "string" },
+          "model": { "type": "string" },
+          "agent": { "type": "string" },
+          "environment": { "type": "string" },
+          "agent_kwargs": { "type": "object" },
+          "api_key_env": { "type": "string" }
+        }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "expected_trial_count": { "type": "integer", "minimum": 0 },
+    "configured_budget_usd": { "type": "number" },
+    "cost_estimate": {
+      "type": "object",
+      "required": ["total_usd", "source", "breakdown"],
+      "properties": {
+        "total_usd": { "type": ["number", "null"] },
+        "source": { "enum": ["historical", "configured_estimate", "mixed", "partial", "unavailable"] },
+        "breakdown": { "type": "array" }
+      }
+    },
+    "reports": { "type": "object" }
+  }
+}

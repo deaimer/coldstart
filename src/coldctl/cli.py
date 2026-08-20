@@ -9,7 +9,9 @@ from pathlib import Path
 import typer
 
 from coldctl import __version__
+from coldctl.eval.cli import eval_app
 from coldctl.results.cli import reports_app, results_app
+from coldctl.task_validation import find_missing_task_files
 
 app = typer.Typer(
     name="coldctl",
@@ -20,6 +22,7 @@ task_app = typer.Typer(help="Create and manage ColdStart tasks.", no_args_is_hel
 app.add_typer(task_app, name="task")
 app.add_typer(results_app, name="results")
 app.add_typer(reports_app, name="reports")
+app.add_typer(eval_app, name="eval")
 
 
 def _require_command(command: str) -> None:
@@ -106,21 +109,7 @@ def validate(
     task_path: Path = typer.Argument(..., exists=True, file_okay=False),
 ) -> None:
     """Validate the minimum ColdStart and Harbor task structure."""
-    required = [
-        "instruction.md",
-        "task.toml",
-        "solution/solve.sh",
-        "tests/test.sh",
-    ]
-    missing = [relative for relative in required if not (task_path / relative).is_file()]
-
-    environment_options = [
-        "environment/Dockerfile",
-        "environment/docker-compose.yaml",
-        "environment/docker-compose.yml",
-    ]
-    if not any((task_path / option).is_file() for option in environment_options):
-        missing.append("environment/Dockerfile or docker-compose.yaml")
+    missing = find_missing_task_files(task_path)
 
     if missing:
         typer.echo("Task structure failed validation:", err=True)

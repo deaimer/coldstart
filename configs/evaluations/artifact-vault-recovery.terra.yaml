@@ -1,0 +1,43 @@
+# Example ColdStart evaluation configuration.
+#
+# Five-trial baseline of gpt-5.6-terra (via the terminus-2 agent harness)
+# against the public artifact-vault-recovery sample task.
+#
+# This file never contains a credential value -- only the *name* of the
+# environment variable ColdStart should find one in (`api_key_env`). Set
+# OPENAI_API_KEY in your shell/CI secret store before running
+# `coldctl eval run` against this config; ColdStart never reads, prints, or
+# stores its value.
+
+id: artifact-vault-recovery-terra-baseline
+description: >-
+  Five-trial baseline evaluation of openai/gpt-5.6-terra via the terminus-2
+  agent harness on the public artifact-vault-recovery sample task.
+benchmark_version: "0.1.0"
+status: development
+
+tasks:
+  - benchmark/sample-tasks/artifact-vault-recovery
+
+systems:
+  - provider: openai
+    model: openai/gpt-5.6-terra
+    agent: terminus-2
+    environment: docker
+    agent_kwargs:
+      reasoning_effort: medium
+      use_responses_api: true
+      max_turns: 30
+    api_key_env: OPENAI_API_KEY
+    trials_per_task: 5
+
+execution:
+  max_concurrent_trials: 1
+  max_infra_retries: 2
+  max_budget_usd: 2.00
+
+reports:
+  private:
+    enabled: true
+  public:
+    enabled: true
