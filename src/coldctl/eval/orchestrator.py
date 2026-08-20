@@ -463,6 +463,43 @@ def _write_trial_log(run_dir: Path, job_name: str, result) -> None:
     (logs_dir / f"{job_name}.log").write_text(content)
 
 
+#: Maps a trial's terminal (or retry-scheduled) status to the progress
+#: phase that should be shown for it. A terminal infrastructure failure
+#: must never be reported as "completed" -- that word is reserved for a
+#: trial that actually reached a scored verdict.
+_TERMINAL_PHASE_BY_TRIAL_STATUS = {
+    "passed": "completed",
+    "failed": "completed",
+    "infra_invalid_retry_scheduled": "infra_retry",
+    "infra_invalid_exhausted": "infra_failed",
+    "auth_error_paused": "paused",
+    "unknown_paused": "paused",
+}
+
+
+def _trial_status_counts(state: RunState) -> tuple[int, int, int]:
+    """Returns (passed, failed, infra_exhausted) counts. ``passed`` and
+    ``failed`` are *scored* trials (the model/agent actually ran and was
+    evaluated); ``infra_exhausted`` trials never reached a scored verdict."""
+    passed = sum(1 for t in state.trials.values() if t.status == "passed")
+    failed = sum(1 for t in state.trials.values() if t.status == "failed")
+    infra_exhausted = sum(1 for t in state.trials.values() if t.status == "infra_invalid_exhausted")
+    return passed, failed, infra_exhausted
+
+
+def _total_elapsed_sec(state: RunState) -> float:
+    """Wall-clock time since this run was first created. Used only for
+    final/summary progress events, so a "just finished" panel shows a
+    meaningful total instead of resetting to 00:00."""
+    try:
+        created = datetime.fromisoformat(state.created_at)
+    except (ValueError, TypeError):
+        return 0.0
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - created).total_seconds())
+
+
 def execute_loop(
     run_dir: Path,
     manifest_dict: dict,
@@ -525,6 +562,7 @@ def execute_loop(
             ) -> None:
                 if progress_callback is None:
                     return
+                passed, failed, infra_exhausted = _trial_status_counts(state)
                 progress_callback(
                     ProgressEvent(
                         run_id=state.run_id,
@@ -538,6 +576,9 @@ def execute_loop(
                         elapsed_sec=elapsed_sec,
                         harbor_status=harbor_status,
                         stdout_tail=stdout_tail,
+                        passed_trials=passed,
+                        failed_trials=failed,
+                        infra_exhausted_trials=infra_exhausted,
                     )
                 )
 
@@ -641,7 +682,14 @@ def execute_loop(
             manifest_module.write_state(run_dir, state)
             manifest_module.append_event(events, event)
             state.last_event = event
-            _emit("completed", harbor_status="exited")
+            # Reflect this trial's *actual* outcome -- a terminal
+            # infrastructure failure (retries exhausted) must never be
+            # reported as "completed", which is reserved for a trial that
+            # reached a genuine scored verdict.
+            _emit(
+                _TERMINAL_PHASE_BY_TRIAL_STATUS.get(trial_state.status, "completed"),
+                harbor_status="exited",
+            )
 
             if stop_reason:
                 break
@@ -660,6 +708,27 @@ def execute_loop(
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
+        if progress_callback is not None:
+            planned_total = len(trial_order)
+            last_spec = specs[trial_order[-1]] if trial_order else None
+            passed, failed, infra_exhausted = _trial_status_counts(state)
+            progress_callback(
+                ProgressEvent(
+                    run_id=state.run_id,
+                    completed_trials=len(state.completed_trial_ids),
+                    planned_trials=planned_total,
+                    current_trial_number=planned_total,
+                    task_name=last_spec.task_name if last_spec else "",
+                    model=last_spec.model if last_spec else "",
+                    agent=last_spec.agent if last_spec else "",
+                    phase="paused",
+                    elapsed_sec=_total_elapsed_sec(state),
+                    harbor_status="exited",
+                    passed_trials=passed,
+                    failed_trials=failed,
+                    infra_exhausted_trials=infra_exhausted,
+                )
+            )
         if stop_reason == "interrupted":
             raise RunInterrupted(state)
         return state
@@ -668,22 +737,35 @@ def execute_loop(
     state.status = "failed" if any_exhausted else "completed"
     manifest_module.write_state(run_dir, state)
 
-    if progress_callback is not None:
-        planned_total = len(trial_order)
+    planned_total = len(trial_order)
+    # These are run-level (not per-trial) summary events: there is no
+    # single "current" trial anymore, so task/system identity is taken from
+    # the last trial in plan order -- never blank, and never a bare "+".
+    last_spec = specs[trial_order[-1]] if trial_order else None
+
+    def _emit_summary(phase: str) -> None:
+        if progress_callback is None:
+            return
+        passed, failed, infra_exhausted = _trial_status_counts(state)
         progress_callback(
             ProgressEvent(
                 run_id=state.run_id,
                 completed_trials=len(state.completed_trial_ids),
                 planned_trials=planned_total,
                 current_trial_number=planned_total,
-                task_name="",
-                model="",
-                agent="",
-                phase="generating_reports",
-                elapsed_sec=0.0,
+                task_name=last_spec.task_name if last_spec else "",
+                model=last_spec.model if last_spec else "",
+                agent=last_spec.agent if last_spec else "",
+                phase=phase,
+                elapsed_sec=_total_elapsed_sec(state),
                 harbor_status="exited",
+                passed_trials=passed,
+                failed_trials=failed,
+                infra_exhausted_trials=infra_exhausted,
             )
         )
+
+    _emit_summary("generating_reports")
 
     trial_keys_by_pair = collect_trial_keys_by_pair(
         manifest_dict, state, repo_root=repo_root, backfill_run_dir=run_dir
@@ -711,22 +793,11 @@ def execute_loop(
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
-    if progress_callback is not None:
-        planned_total = len(trial_order)
-        progress_callback(
-            ProgressEvent(
-                run_id=state.run_id,
-                completed_trials=len(state.completed_trial_ids),
-                planned_trials=planned_total,
-                current_trial_number=planned_total,
-                task_name="",
-                model="",
-                agent="",
-                phase="completed",
-                elapsed_sec=0.0,
-                harbor_status="exited",
-            )
-        )
+    # A run that ended "failed" (infrastructure retries exhausted for at
+    # least one trial) must show "infrastructure failed", never "completed"
+    # -- even though every trial slot is finished and the progress
+    # percentage correctly reads 100%.
+    _emit_summary("infra_failed" if any_exhausted else "completed")
     return state
 
 

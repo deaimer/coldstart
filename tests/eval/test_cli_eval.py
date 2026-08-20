@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import io
 import json
+from pathlib import Path
 
+import pytest
+import typer
+from rich.console import Console
 from typer.testing import CliRunner
 
 from coldctl.cli import app
+from coldctl.eval import cli as cli_module
+from coldctl.eval.manifest import RunState, TrialState
+from coldctl.eval.orchestrator import RunOutcome
 
 from .conftest import TASK_DIR_NAME
 
@@ -113,6 +121,42 @@ def test_eval_resume_requires_yes(fake_repo, monkeypatch):
     result = runner.invoke(app, ["eval", "resume", "some-run"])
     assert result.exit_code == 1
     assert "--yes" in result.output
+
+
+def test_print_run_outcome_distinguishes_infra_exhaustion_from_scored_trials(monkeypatch):
+    """Regression test for the reported Terminus-2 incident: three
+    consecutive infra_invalid attempts on one trial (tmux failed to start,
+    retries exhausted, Terra never ran, cost $0). The CLI's final summary
+    must never call this "completed" without qualification, must still
+    show it as a finished planned slot, and must separately surface the
+    invalid infrastructure attempt count -- never folding it into
+    passes/failures."""
+    trial = TrialState(trial_id="t1", status="infra_invalid_exhausted", attempts=3)
+    state = RunState(
+        schema_version=1,
+        run_id="infra-exhaustion-run",
+        status="failed",
+        trials={"t1": trial},
+        invalid_infrastructure_attempts=3,
+        actual_cost_usd=0.0,
+    )
+    outcome = RunOutcome(run_id="infra-exhaustion-run", run_dir=Path("/does-not-matter"), state=state)
+
+    buffer = io.StringIO()
+    monkeypatch.setattr(cli_module, "console", Console(file=buffer, width=200))
+
+    with pytest.raises(typer.Exit):
+        cli_module._print_run_outcome(outcome)
+
+    output = buffer.getvalue()
+    assert "completed" not in output.lower()
+    assert "planned: 1" in output
+    assert "finished: 1" in output
+    assert "pending: 0" in output
+    assert "Scored: 0 (passed: 0  failed: 0)" in output
+    assert "Infra-failed (retries exhausted): 1" in output
+    assert "Invalid infra attempts: 3" in output
+    assert "$0.0000000" in output
 
 
 def test_existing_top_level_commands_still_registered_alongside_eval():

@@ -28,6 +28,9 @@ PHASES = (
     "verifying",
     "ingesting",
     "generating_reports",
+    "infra_retry",
+    "infra_failed",
+    "paused",
     "completed",
 )
 
@@ -38,6 +41,9 @@ _PHASE_LABELS = {
     "verifying": "verifying",
     "ingesting": "ingesting",
     "generating_reports": "generating reports",
+    "infra_retry": "retrying after infrastructure failure",
+    "infra_failed": "infrastructure failed",
+    "paused": "paused",
     "completed": "completed",
 }
 
@@ -55,6 +61,18 @@ class ProgressEvent:
     elapsed_sec: float
     harbor_status: str  # "not_started" | "active" | "exited"
     stdout_tail: str = ""
+    #: Trials that actually ran to a scored verdict.
+    passed_trials: int = 0
+    failed_trials: int = 0
+    #: Trials that never reached a scored verdict because infrastructure
+    #: retries were exhausted. Counted in ``completed_trials`` (a terminal
+    #: infra failure is a finished slot for progress-percentage purposes)
+    #: but must never be presented as a completed *scored* model trial.
+    infra_exhausted_trials: int = 0
+
+    @property
+    def scored_trials(self) -> int:
+        return self.passed_trials + self.failed_trials
 
     @property
     def phase_label(self) -> str:
@@ -63,7 +81,8 @@ class ProgressEvent:
     @property
     def overall_percent(self) -> float:
         """Real completion percentage from completed/planned trial counts
-        only -- never a time-based estimate."""
+        only -- never a time-based estimate. A terminal infrastructure
+        failure counts as a finished slot here, same as a scored trial."""
         if self.planned_trials <= 0:
             return 0.0
         return 100.0 * self.completed_trials / self.planned_trials
@@ -74,8 +93,10 @@ class ProgressEvent:
         line = (
             f"[{self.run_id}] overall {self.completed_trials}/{self.planned_trials} "
             f"({self.overall_percent:.0f}%) -- trial {self.current_trial_number}/{self.planned_trials} "
-            f"task={self.task_name} model={self.model} agent={self.agent} "
-            f"phase={self.phase_label} elapsed={elapsed} harbor={self.harbor_status}"
+            f"task={_format_task(self.task_name)} system={_format_system(self.model, self.agent)} "
+            f"phase={self.phase_label} elapsed={elapsed} harbor={self.harbor_status} "
+            f"[scored={self.scored_trials} passed={self.passed_trials} failed={self.failed_trials} "
+            f"infra_failed={self.infra_exhausted_trials}]"
         )
         return redact_text(line)
 
@@ -84,6 +105,25 @@ def _format_elapsed(seconds: float) -> str:
     total = max(0, int(seconds))
     minutes, secs = divmod(total, 60)
     return f"{minutes:02d}:{secs:02d}"
+
+
+def _format_task(task_name: str) -> str:
+    return task_name.strip() or "(unknown)"
+
+
+def _format_system(model: str, agent: str) -> str:
+    """Never renders a bare '+' -- defense in depth alongside the
+    orchestrator always supplying real task/system identifiers, in case a
+    caller ever constructs a ProgressEvent without them."""
+    model = model.strip()
+    agent = agent.strip()
+    if not model and not agent:
+        return "(unknown)"
+    if not model:
+        return agent
+    if not agent:
+        return model
+    return f"{model} + {agent}"
 
 
 class ProgressRenderer:
@@ -146,11 +186,16 @@ class ProgressRenderer:
             "Overall:", f"{event.completed_trials}/{event.planned_trials} completed ({event.overall_percent:.0f}%)"
         )
         table.add_row("Current:", f"trial {event.current_trial_number}/{event.planned_trials}")
-        table.add_row("Task:", redact_text(event.task_name))
-        table.add_row("System:", redact_text(f"{event.model} + {event.agent}"))
+        table.add_row("Task:", redact_text(_format_task(event.task_name)))
+        table.add_row("System:", redact_text(_format_system(event.model, event.agent)))
         table.add_row("Phase:", event.phase_label)
         table.add_row("Elapsed:", _format_elapsed(event.elapsed_sec))
         table.add_row("Harbor:", event.harbor_status)
+        table.add_row(
+            "Scored:",
+            f"{event.scored_trials} (passed {event.passed_trials}, failed {event.failed_trials}) "
+            f"-- infra failed {event.infra_exhausted_trials}",
+        )
         if self._verbose and event.stdout_tail:
             table.add_row("Output:", redact_text(event.stdout_tail.strip().splitlines()[-1] if event.stdout_tail.strip() else ""))
         return Panel(table, title="ColdStart evaluation progress")

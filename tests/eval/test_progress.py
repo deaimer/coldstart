@@ -365,3 +365,181 @@ def test_subprocess_harbor_runner_kills_child_on_keyboard_interrupt(tmp_path):
 
     # Must return promptly (child killed), not wait out the full 10s sleep.
     assert elapsed < 5.0
+
+
+# --- Regression: three-attempt infrastructure exhaustion ---------------------
+#
+# Reproduces the real incident this was fixed for: Harbor tried to install
+# tmux/asciinema at runtime in an offline environment, failed identically on
+# every attempt ("RuntimeError: Failed to start tmux session"), exhausted
+# max_infra_retries=2 (3 total attempts), and the model/agent never ran at
+# all (cost stayed $0). Before the fix, the live progress display showed the
+# exhausted trial as "completed" with a blank Task and "System: +", and the
+# run's final elapsed time reset to 00:00.
+
+
+def _run_three_attempt_infra_exhaustion(fake_repo, events: list[ProgressEvent]):
+    config = make_config(
+        trials_per_task=1, max_budget_usd=5.0, max_infra_retries=2, estimated_cost_per_trial_usd=0.1
+    )
+    trial_ids = _plan_trial_ids(fake_repo, config)
+    trial_id = trial_ids[0]
+    runner = FakeHarborRunner(
+        {
+            trial_id: [
+                ScriptedOutcome(
+                    kind="infra_invalid",
+                    exception_type="RuntimeError",
+                    exception_message="Failed to start tmux session",
+                )
+            ]
+            * 3
+        }
+    )
+    coldstart_dir = fake_repo / COLDSTART
+    outcome = orchestrator.run_evaluation(
+        config,
+        repo_root=fake_repo,
+        coldstart_dir=coldstart_dir,
+        phase1_db_path=coldstart_dir / "results.db",
+        allow_dirty=False,
+        budget_ack=False,
+        harbor_runner=runner,
+        run_id="infra-exhaustion-run",
+        skip_preflight=True,
+        progress_callback=events.append,
+    )
+    return outcome, trial_id, runner
+
+
+def test_three_attempt_infra_exhaustion_matches_the_reported_incident(fake_repo):
+    events: list[ProgressEvent] = []
+    outcome, trial_id, runner = _run_three_attempt_infra_exhaustion(fake_repo, events)
+
+    assert len(runner.calls) == 3  # exactly the three attempts from the incident
+    assert outcome.state.trials[trial_id].status == "infra_invalid_exhausted"
+    assert outcome.state.trials[trial_id].attempts == 3
+    assert outcome.state.status == "failed"
+    assert outcome.state.actual_cost_usd == 0.0  # Terra never ran; cost stayed $0
+
+
+def test_infra_exhaustion_never_reports_completed_phase(fake_repo):
+    events: list[ProgressEvent] = []
+    _run_three_attempt_infra_exhaustion(fake_repo, events)
+
+    # Not one event across the whole run may claim "completed" -- the trial
+    # never reached a scored verdict.
+    assert all(e.phase != "completed" for e in events)
+    # The first two (retryable) attempts show "infra_retry"...
+    assert "infra_retry" in [e.phase for e in events]
+    # ...and the run's final state is reported as "infrastructure failed".
+    assert events[-1].phase == "infra_failed"
+    assert events[-1].phase_label == "infrastructure failed"
+
+
+def test_infra_exhaustion_preserves_task_and_system_names(fake_repo):
+    events: list[ProgressEvent] = []
+    _run_three_attempt_infra_exhaustion(fake_repo, events)
+
+    final_event = events[-1]
+    assert final_event.task_name.strip() != ""
+    assert final_event.model.strip() != ""
+    assert final_event.agent.strip() != ""
+    # Defense-in-depth formatting must never show a bare "+" or blank task
+    # even if it were ever given empty values.
+    from coldctl.eval.progress import _format_system, _format_task
+
+    assert _format_task(final_event.task_name) != "(unknown)"
+    assert _format_system(final_event.model, final_event.agent) != "(unknown)"
+    assert "+" in _format_system(final_event.model, final_event.agent)
+
+
+def test_infra_exhaustion_final_elapsed_time_is_not_reset_to_zero(fake_repo):
+    events: list[ProgressEvent] = []
+    _run_three_attempt_infra_exhaustion(fake_repo, events)
+
+    final_event = events[-1]
+    assert final_event.elapsed_sec > 0.0
+
+
+def test_infra_exhaustion_counts_as_finished_slot_but_not_scored(fake_repo):
+    events: list[ProgressEvent] = []
+    outcome, _, _ = _run_three_attempt_infra_exhaustion(fake_repo, events)
+
+    final_event = events[-1]
+    # A finished infra-exhausted slot legitimately drives the overall
+    # percentage to 100%...
+    assert final_event.completed_trials == 1
+    assert final_event.planned_trials == 1
+    assert final_event.overall_percent == 100.0
+    # ...but it must never be counted or presented as a scored model trial.
+    assert final_event.scored_trials == 0
+    assert final_event.passed_trials == 0
+    assert final_event.failed_trials == 0
+    assert final_event.infra_exhausted_trials == 1
+    assert outcome.state.invalid_infrastructure_attempts == 3
+
+
+def test_infra_exhaustion_final_panel_shows_infrastructure_failed_not_completed():
+    """Direct rendering check: the interactive panel for an infra-exhausted
+    run must say 'infrastructure failed', never 'completed', and must show
+    the real task/system rather than a blank Task or bare '+'."""
+    buffer = io.StringIO()
+    console = Console(file=buffer, force_terminal=True, width=200)
+    with ProgressRenderer(console=console, interactive=True) as renderer:
+        renderer(
+            ProgressEvent(
+                run_id="panel-infra-run",
+                completed_trials=1,
+                planned_trials=1,
+                current_trial_number=1,
+                task_name="trust-chain-rotation-recovery",
+                model="openai/gpt-5.6-terra",
+                agent="terminus-2",
+                phase="infra_failed",
+                elapsed_sec=125.0,
+                harbor_status="exited",
+                passed_trials=0,
+                failed_trials=0,
+                infra_exhausted_trials=1,
+            )
+        )
+    output = buffer.getvalue()
+    assert "infrastructure failed" in output
+    # "Overall: 1/1 completed (100%)" legitimately uses the word "completed"
+    # to describe finished *slots* (an infra-exhausted trial is a finished
+    # slot); it is specifically the Phase row that must never say it.
+    phase_lines = [line for line in output.splitlines() if "Phase:" in line]
+    assert phase_lines, f"no Phase row found in panel output: {output!r}"
+    assert all("completed" not in line.lower() for line in phase_lines)
+    assert all("infrastructure failed" in line for line in phase_lines)
+    assert "trust-chain-rotation-recovery" in output
+    assert "System:  + " not in output
+    assert "02:05" in output  # 125s elapsed, not reset to 00:00
+
+
+def test_non_interactive_heartbeat_for_infra_exhaustion_shows_breakdown():
+    buffer = io.StringIO()
+    console = Console(file=buffer, force_terminal=False, width=200)
+    renderer = ProgressRenderer(console=console, interactive=False)
+    renderer(
+        ProgressEvent(
+            run_id="hb-infra-run",
+            completed_trials=1,
+            planned_trials=1,
+            current_trial_number=1,
+            task_name="trust-chain-rotation-recovery",
+            model="openai/gpt-5.6-terra",
+            agent="terminus-2",
+            phase="infra_failed",
+            elapsed_sec=90.0,
+            harbor_status="exited",
+            passed_trials=0,
+            failed_trials=0,
+            infra_exhausted_trials=1,
+        )
+    )
+    output = buffer.getvalue()
+    assert "infrastructure failed" in output
+    assert "scored=0" in output
+    assert "infra_failed=1" in output

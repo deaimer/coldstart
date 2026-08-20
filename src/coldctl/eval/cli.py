@@ -198,10 +198,22 @@ def eval_run(
 def _print_run_outcome(outcome: orchestrator.RunOutcome) -> None:
     state = outcome.state
     console.print(f"[bold]Run {outcome.run_id}: {state.status}[/bold]")
-    console.print(f"Completed trials: {len(state.completed_trial_ids)}; pending: {len(state.pending_trial_ids)}")
     passes = sum(1 for t in state.trials.values() if t.status == "passed")
     failures = sum(1 for t in state.trials.values() if t.status == "failed")
-    console.print(f"Passes: {passes}  Failures: {failures}")
+    infra_exhausted = sum(1 for t in state.trials.values() if t.status == "infra_invalid_exhausted")
+    console.print(
+        f"Trials -- planned: {len(state.trials)}  finished: {len(state.completed_trial_ids)}  "
+        f"pending: {len(state.pending_trial_ids)}"
+    )
+    # "Finished" (above) includes infra-exhausted trials as filled slots for
+    # progress purposes, but they are never scored model outcomes -- keep
+    # scored passes/failures separate from infra-only exhaustion here so a
+    # terminal infra failure can never be read as a completed model trial.
+    console.print(
+        f"Scored: {passes + failures} (passed: {passes}  failed: {failures})  "
+        f"Infra-failed (retries exhausted): {infra_exhausted}  "
+        f"Invalid infra attempts: {state.invalid_infrastructure_attempts}"
+    )
     console.print(f"Accumulated cost: ${state.actual_cost_usd:.7f}")
     if state.private_report.generated or state.public_report.generated:
         console.print(
