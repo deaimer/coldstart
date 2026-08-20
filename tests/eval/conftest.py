@@ -42,6 +42,7 @@ def fake_repo(tmp_path) -> Path:
 
 def make_config(
     *,
+    id: str = "fake-eval",
     trials_per_task: int = 5,
     status: str = "development",
     max_budget_usd: float = 2.0,
@@ -50,7 +51,7 @@ def make_config(
     source_path: Path | None = None,
 ) -> EvaluationConfig:
     return EvaluationConfig(
-        id="fake-eval",
+        id=id,
         description="fake evaluation for tests",
         benchmark_version="0.1.0",
         status=status,

@@ -15,7 +15,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from coldctl.results.aggregate import compute_aggregate
+from coldctl.results.aggregate import compute_aggregate, compute_aggregate_for_trial_keys
 from coldctl.results.constants import DIMENSIONS
 
 VISIBILITIES = ("public", "private")
@@ -39,6 +39,23 @@ def _trial_ids_and_rows(conn: sqlite3.Connection, *, task: str, system: str) -> 
         ORDER BY trials.started_at
         """,
         (task, system),
+    ).fetchall()
+
+
+def _trial_rows_for_keys(conn: sqlite3.Connection, trial_keys: list[str]) -> list[sqlite3.Row]:
+    """Same shape as :func:`_trial_ids_and_rows`, but scoped to an explicit
+    set of trial_keys rather than task/system identity. Assumes the keys
+    have already been validated (e.g. via compute_aggregate_for_trial_keys)."""
+    placeholders = ", ".join("?" for _ in trial_keys)
+    return conn.execute(
+        f"""
+        SELECT trials.*, runs.run_key AS run_key
+        FROM trials
+        JOIN runs ON runs.id = trials.run_id
+        WHERE trials.trial_key IN ({placeholders})
+        ORDER BY trials.started_at
+        """,
+        list(trial_keys),
     ).fetchall()
 
 
@@ -97,9 +114,26 @@ def _evaluation_date_range(rows: list[sqlite3.Row]) -> dict[str, str | None]:
     return {"from": started[0][:10], "to": started[-1][:10]}
 
 
-def build_private_report(conn: sqlite3.Connection, *, task: str, system: str) -> dict[str, Any]:
-    aggregate = compute_aggregate(conn, task=task, system=system)
-    rows = _trial_ids_and_rows(conn, task=task, system=system)
+def build_private_report(
+    conn: sqlite3.Connection,
+    *,
+    task: str,
+    system: str,
+    trial_keys: list[str] | None = None,
+    orchestration_run_id: str | None = None,
+) -> dict[str, Any]:
+    """Build a private report. When ``trial_keys`` is given, the report is
+    scoped to exactly those trials (see
+    ``compute_aggregate_for_trial_keys``); otherwise it falls back to
+    Phase 1's all-history aggregation for (task, system) -- the same
+    behavior as before trial-key scoping existed, preserved for the
+    existing ``coldctl reports task`` command."""
+    if trial_keys is not None:
+        aggregate = compute_aggregate_for_trial_keys(conn, trial_keys, task=task, system=system)
+        rows = _trial_rows_for_keys(conn, trial_keys)
+    else:
+        aggregate = compute_aggregate(conn, task=task, system=system)
+        rows = _trial_ids_and_rows(conn, task=task, system=system)
 
     attempts = []
     for row in rows:
@@ -137,7 +171,7 @@ def build_private_report(conn: sqlite3.Connection, *, task: str, system: str) ->
             }
         )
 
-    return {
+    report = {
         "schema": "coldstart.private_report.v1",
         "visibility": "private",
         "task": task,
@@ -148,14 +182,30 @@ def build_private_report(conn: sqlite3.Connection, *, task: str, system: str) ->
         "aggregate": aggregate.to_dict(),
         "attempts": attempts,
     }
+    if orchestration_run_id is not None:
+        report["orchestration_run_id"] = orchestration_run_id
+    return report
 
 
-def build_public_report(conn: sqlite3.Connection, *, task: str, system: str) -> dict[str, Any]:
-    aggregate = compute_aggregate(conn, task=task, system=system)
-    rows = _trial_ids_and_rows(conn, task=task, system=system)
+def build_public_report(
+    conn: sqlite3.Connection,
+    *,
+    task: str,
+    system: str,
+    trial_keys: list[str] | None = None,
+    orchestration_run_id: str | None = None,
+) -> dict[str, Any]:
+    """See ``build_private_report`` for the ``trial_keys``/
+    ``orchestration_run_id`` scoping behavior."""
+    if trial_keys is not None:
+        aggregate = compute_aggregate_for_trial_keys(conn, trial_keys, task=task, system=system)
+        rows = _trial_rows_for_keys(conn, trial_keys)
+    else:
+        aggregate = compute_aggregate(conn, task=task, system=system)
+        rows = _trial_ids_and_rows(conn, task=task, system=system)
     aggregate_dict = aggregate.to_dict()
 
-    return {
+    report = {
         "schema": "coldstart.public_report.v1",
         "visibility": "public",
         "task": task,
@@ -177,16 +227,29 @@ def build_public_report(conn: sqlite3.Connection, *, task: str, system: str) -> 
             "exceptions": aggregate_dict["exception_count"],
         },
     }
+    if orchestration_run_id is not None:
+        report["orchestration_run_id"] = orchestration_run_id
+    return report
 
 
 def build_report(
-    conn: sqlite3.Connection, *, task: str, system: str, visibility: str
+    conn: sqlite3.Connection,
+    *,
+    task: str,
+    system: str,
+    visibility: str,
+    trial_keys: list[str] | None = None,
+    orchestration_run_id: str | None = None,
 ) -> dict[str, Any]:
     if visibility not in VISIBILITIES:
         raise ValueError(f"visibility must be one of {VISIBILITIES}, got {visibility!r}")
     if visibility == "private":
-        return build_private_report(conn, task=task, system=system)
-    return build_public_report(conn, task=task, system=system)
+        return build_private_report(
+            conn, task=task, system=system, trial_keys=trial_keys, orchestration_run_id=orchestration_run_id
+        )
+    return build_public_report(
+        conn, task=task, system=system, trial_keys=trial_keys, orchestration_run_id=orchestration_run_id
+    )
 
 
 def render_json(report: dict[str, Any]) -> str:
@@ -207,6 +270,8 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines.append(f"# ColdStart task report — {report['task']} / {report['system']}")
     lines.append("")
     lines.append(f"- Visibility: **{visibility}**")
+    if report.get("orchestration_run_id"):
+        lines.append(f"- ColdStart orchestration run ID: {report['orchestration_run_id']}")
     lines.append(f"- Generated at: {report['generated_at']}")
     date_range = report.get("evaluation_date_range", {})
     lines.append(f"- Evaluation date range: {date_range.get('from')} to {date_range.get('to')}")

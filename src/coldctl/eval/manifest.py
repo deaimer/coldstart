@@ -82,6 +82,7 @@ class TrialState:
     evidence: str | None = None
     cost_usd: float | None = None
     ingested: bool = False
+    phase1_trial_key: str | None = None
     last_updated: str = field(default_factory=_now_iso)
 
 

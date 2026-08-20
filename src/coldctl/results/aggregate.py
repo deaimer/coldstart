@@ -70,6 +70,21 @@ class TaskSystemAggregate:
         }
 
 
+class EmptyTrialSelectionError(ValueError):
+    """Raised when an explicit trial-key/trial-id selection is empty.
+    Aggregation must never silently fall back to all-history in this case
+    (see :func:`compute_aggregate_for_trial_keys`)."""
+
+
+class UnknownTrialKeysError(ValueError):
+    """Raised when one or more explicitly-selected trial keys do not exist
+    in the results store."""
+
+    def __init__(self, missing_keys: list[str]) -> None:
+        self.missing_keys = list(missing_keys)
+        super().__init__(f"unknown trial key(s): {self.missing_keys}")
+
+
 def _trial_ids_for(conn: sqlite3.Connection, *, task: str, system: str) -> list[int]:
     rows = conn.execute(
         """
@@ -85,11 +100,86 @@ def _trial_ids_for(conn: sqlite3.Connection, *, task: str, system: str) -> list[
     return [row["id"] for row in rows]
 
 
+def _trial_ids_for_keys(conn: sqlite3.Connection, trial_keys: list[str]) -> list[int]:
+    """Resolve explicit Phase 1 trial_keys to row ids, in the given order.
+    Raises UnknownTrialKeysError if any key is not present in the store."""
+    placeholders = ", ".join("?" for _ in trial_keys)
+    rows = conn.execute(
+        f"SELECT id, trial_key FROM trials WHERE trial_key IN ({placeholders})", trial_keys
+    ).fetchall()
+    found = {row["trial_key"]: row["id"] for row in rows}
+    missing = [key for key in trial_keys if key not in found]
+    if missing:
+        raise UnknownTrialKeysError(missing)
+    return [found[key] for key in trial_keys]
+
+
+def _derive_task_system_labels(
+    conn: sqlite3.Connection, trial_ids: list[int]
+) -> tuple[str, str]:
+    placeholders = ", ".join("?" for _ in trial_ids)
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT tasks.name AS task_name, systems.system_key AS system_key
+        FROM trials
+        JOIN task_versions ON task_versions.id = trials.task_version_id
+        JOIN tasks ON tasks.id = task_versions.task_id
+        JOIN systems ON systems.id = trials.system_id
+        WHERE trials.id IN ({placeholders})
+        """,
+        trial_ids,
+    ).fetchall()
+    task_names = sorted({row["task_name"] for row in rows})
+    system_keys = sorted({row["system_key"] for row in rows})
+    task = task_names[0] if len(task_names) == 1 else "+".join(task_names)
+    system = system_keys[0] if len(system_keys) == 1 else "+".join(system_keys)
+    return task, system
+
+
 def compute_aggregate(conn: sqlite3.Connection, *, task: str, system: str) -> TaskSystemAggregate:
+    """All-history aggregation for a (task, system) pair. This is an
+    explicit call path (see module docstring): it is never invoked
+    automatically by the Phase 2 evaluation runner, which always scopes its
+    own reports to an explicit trial-key selection via
+    :func:`compute_aggregate_for_trial_keys`."""
     trial_ids = _trial_ids_for(conn, task=task, system=system)
     if not trial_ids:
         raise ValueError(f"No ingested trials found for task={task!r} system={system!r}")
+    return _aggregate_from_trial_ids(conn, trial_ids, task=task, system=system)
 
+
+def compute_aggregate_for_trial_keys(
+    conn: sqlite3.Connection,
+    trial_keys: list[str],
+    *,
+    task: str | None = None,
+    system: str | None = None,
+) -> TaskSystemAggregate:
+    """Aggregation scoped to an explicit, caller-supplied set of Phase 1
+    trial keys -- never inferred from task/system identity alone. Used by
+    the Phase 2 evaluation runner so a run's automatic report only ever
+    reflects the trials that run itself produced, regardless of how much
+    other history exists for the same (task, system) pair.
+
+    Raises :class:`EmptyTrialSelectionError` for an empty selection (never
+    silently falls back to all-history) and :class:`UnknownTrialKeysError`
+    if any key does not exist in the store.
+    """
+    if not trial_keys:
+        raise EmptyTrialSelectionError(
+            "no trial keys provided; refusing to aggregate over all history"
+        )
+    trial_ids = _trial_ids_for_keys(conn, list(trial_keys))
+    if task is None or system is None:
+        derived_task, derived_system = _derive_task_system_labels(conn, trial_ids)
+        task = task if task is not None else derived_task
+        system = system if system is not None else derived_system
+    return _aggregate_from_trial_ids(conn, trial_ids, task=task, system=system)
+
+
+def _aggregate_from_trial_ids(
+    conn: sqlite3.Connection, trial_ids: list[int], *, task: str, system: str
+) -> TaskSystemAggregate:
     placeholders = ", ".join("?" for _ in trial_ids)
 
     task_versions = [

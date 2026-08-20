@@ -19,11 +19,11 @@ class InterruptingHarborRunner(FakeHarborRunner):
         self._interrupt_on = interrupt_on_call_index
         self._n = 0
 
-    def run_trial(self, *, trial, job_name, jobs_dir):
+    def run_trial(self, *, trial, job_name, jobs_dir, on_progress=None):
         self._n += 1
         if self._n == self._interrupt_on:
             raise KeyboardInterrupt()
-        return super().run_trial(trial=trial, job_name=job_name, jobs_dir=jobs_dir)
+        return super().run_trial(trial=trial, job_name=job_name, jobs_dir=jobs_dir, on_progress=on_progress)
 
 
 def _plan_trial_ids(fake_repo, config):

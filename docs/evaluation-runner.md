@@ -1,4 +1,4 @@
-# ColdStart Evaluation Runner (Phase 2)
+# ColdStart Evaluation Runner (Phase 2 / 2.1)
 
 `coldctl eval` is a safe, resumable, provider-agnostic automated evaluation
 runner built on top of Harbor and the Phase 1 results system
@@ -67,9 +67,10 @@ reports:
 ```bash
 uv run coldctl eval validate <config>
 uv run coldctl eval plan <config> [--allow-dirty] [--json]
-uv run coldctl eval run <config> --yes [--allow-dirty] [--acknowledge-unestimated-cost]
+uv run coldctl eval run <config> --yes [--allow-dirty] [--acknowledge-unestimated-cost] [--verbose]
 uv run coldctl eval status <run-id> [--json]
-uv run coldctl eval resume <run-id> --yes [--acknowledge-unestimated-cost]
+uv run coldctl eval resume <run-id> --yes [--acknowledge-unestimated-cost] [--verbose]
+uv run coldctl eval regenerate-reports <run-id>
 ```
 
 ### `eval validate`
@@ -157,6 +158,21 @@ report-generation status. Supports `--json`.
   run does.
 - Preserves the original run ID.
 - Safe to invoke twice: resuming an already-completed/failed run is a no-op.
+
+### `eval regenerate-reports`
+
+```bash
+uv run coldctl eval regenerate-reports <run-id>
+```
+
+Regenerates a completed run's public/private reports from its already-recorded
+trial membership (see "Report isolation" below) **without executing Harbor**.
+Useful after a report-generation bug, a Phase 1 schema/rendering change, or
+simply to re-derive the reports for an older run. Idempotent: the recorded
+membership is stable, so repeated calls reproduce the same figures (only the
+`generated_at` timestamp changes). Fails clearly (exit 1) rather than
+silently falling back to all-history if the run has no ingested trials, or
+if a recorded trial key no longer resolves in the Phase 1 store.
 
 ## Why one Harbor invocation per trial
 
@@ -246,9 +262,83 @@ After every scheduled trial reaches a terminal state, ColdStart reuses
   [`tests/eval/test_orchestrator.py`](../tests/eval/test_orchestrator.py)):
   no local filesystem paths, no individual hidden-check names, no
   trajectory/oracle/verifier content, no secrets.
+- Both include an `orchestration_run_id` field identifying exactly which
+  `coldctl eval` run produced them (absent from plain Phase 1 reports that
+  were never scoped to a run -- see below).
 
 Reports are never staged or committed automatically -- they land as plain
 files for a human to review.
+
+## Report isolation
+
+**A run's automatic report only ever reflects the trials that run itself
+produced -- never all history for the same (task, system) pair, no matter
+how much other history already exists in Phase 1's SQLite store.**
+
+Phase 1's `coldctl reports task`/`coldctl results ...` may still aggregate
+*all* history for a (task, system) pair -- that remains available as an
+explicit call path (`coldctl.results.aggregate.compute_aggregate`) and an
+explicit CLI command, unchanged. But `coldctl eval run`/`resume`/
+`regenerate-reports` never uses it automatically. Instead:
+
+1. After each trial is ingested into Phase 1, the orchestrator captures the
+   *exact* normalized Phase 1 `trial_key` that ingestion produced
+   (`run_key::trial_name`) and persists it atomically onto that trial in
+   `state.json` (`TrialState.phase1_trial_key`) -- a durable association
+   between the ColdStart orchestration run ID, the planned trial ID, the
+   Harbor job it ran in, and the ingested Phase 1 trial.
+2. Report generation collects every trial's recorded key, grouped by
+   (task, system), and calls
+   `coldctl.results.aggregate.compute_aggregate_for_trial_keys`/
+   `coldctl.results.reports.build_report(..., trial_keys=[...])` -- aggregation
+   and rendering scoped to *exactly* that explicit set of trial keys.
+3. An **empty** selection (e.g. every attempt for a pair was
+   infrastructure-invalid) raises `EmptyTrialSelectionError` internally,
+   which report generation treats as "nothing to report for this pair" --
+   it never silently falls back to all-history.
+4. A recorded trial key that no longer resolves in the Phase 1 store (e.g.
+   the database was rebuilt) raises `UnknownTrialKeysError`, surfaced as a
+   clear `ReportMembershipError` rather than a silently wrong report.
+5. Runs created before `phase1_trial_key` existed are self-healing: the
+   first time reports are generated (or regenerated) for such a run, the
+   key is derived from the trial's own recorded Harbor job directory (the
+   same way ingestion itself derives it) and written back atomically, so
+   it never needs re-deriving again.
+
+Resuming a run reuses this same persisted membership unchanged -- resumed
+trials just add more entries to it.
+
+## Live progress
+
+`eval run`/`eval resume` no longer wait silently on Harbor: visible progress
+starts immediately after a trial launches and updates at least every few
+seconds while it runs.
+
+- Interactive terminals get a live-updating panel; non-interactive output
+  (CI, redirected/piped stdout) gets a concise heartbeat line instead,
+  printed on every phase change and otherwise at most once every 5 seconds
+  (`coldctl.eval.progress.ProgressRenderer`).
+- Phases, in order: `preparing` → `launching Harbor` → `agent running` /
+  `verifying` (best-effort, detected from Harbor's own live output) →
+  `ingesting` → `generating reports` → `completed`. The `ingesting` and
+  `generating reports` transitions are exact (ColdStart's own code, not a
+  guess); `verifying` is a best-effort heuristic since Harbor's agent
+  execution and verification both happen inside one opaque subprocess.
+- **Overall completion percentage is always `completed_trials /
+  planned_trials`** -- never derived from elapsed time.
+- `--verbose` additionally shows the most recent line of Harbor's own
+  (redacted) output.
+- Everything shown is passed through the same redaction used for command
+  arguments and captured logs (`coldctl.eval.redact.redact_text`); an API
+  key is never displayed.
+- Harbor itself is invoked via `subprocess.Popen` with stdout/stderr
+  redirected to files (never pipes, which can deadlock once their OS buffer
+  fills if nobody drains them) and polled at a short interval
+  (`SubprocessHarborRunner`, default every 1s); the complete captured output
+  is still written to `logs/<job-name>.log`, redacted, exactly as before.
+- `Ctrl+C` during a live trial kills the in-flight Harbor process (so
+  nothing keeps running -- and spending -- unattended) and the run is
+  atomically marked `paused`, exactly as without progress rendering.
 
 ## Budget controls
 

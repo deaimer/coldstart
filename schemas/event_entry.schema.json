@@ -18,7 +18,8 @@
         "trial_auth_error",
         "trial_unknown_paused",
         "run_paused",
-        "run_finished"
+        "run_finished",
+        "reports_regenerated"
       ]
     },
     "run_id": { "type": "string" },

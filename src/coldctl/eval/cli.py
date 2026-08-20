@@ -15,6 +15,7 @@ from coldctl.eval import orchestrator
 from coldctl.eval.config import ConfigError, load_config
 from coldctl.eval.harbor_runner import SubprocessHarborRunner
 from coldctl.eval.planner import DirtyWorktreeError, build_plan
+from coldctl.eval.progress import ProgressRenderer
 from coldctl.task_validation import find_missing_task_files
 
 eval_app = typer.Typer(help="Plan and run automated, provider-agnostic evaluations.", no_args_is_help=True)
@@ -138,6 +139,7 @@ def eval_run(
         "--acknowledge-unestimated-cost",
         help="Required together with --yes when no cost estimate is available.",
     ),
+    verbose: bool = typer.Option(False, "--verbose", help="Show sanitized Harbor output in the progress display."),
     coldstart_dir: Path = typer.Option(DEFAULT_COLDSTART_DIR, "--coldstart-dir", hidden=True),
 ) -> None:
     """Execute a plan trial-by-trial, ingesting and reporting as it goes."""
@@ -164,15 +166,17 @@ def eval_run(
         raise typer.Exit(0)
 
     try:
-        outcome = orchestrator.run_evaluation(
-            config,
-            repo_root=repo_root,
-            coldstart_dir=coldstart_dir,
-            phase1_db_path=phase1_db_path,
-            allow_dirty=allow_dirty,
-            budget_ack=acknowledge_unestimated_cost,
-            harbor_runner=SubprocessHarborRunner(),
-        )
+        with ProgressRenderer(console=console, verbose=verbose) as renderer:
+            outcome = orchestrator.run_evaluation(
+                config,
+                repo_root=repo_root,
+                coldstart_dir=coldstart_dir,
+                phase1_db_path=phase1_db_path,
+                allow_dirty=allow_dirty,
+                budget_ack=acknowledge_unestimated_cost,
+                harbor_runner=SubprocessHarborRunner(),
+                progress_callback=renderer,
+            )
     except orchestrator.PreflightError as exc:
         error_console.print("[red]Preflight checks failed:[/red]")
         for problem in exc.problems:
@@ -195,7 +199,15 @@ def _print_run_outcome(outcome: orchestrator.RunOutcome) -> None:
     state = outcome.state
     console.print(f"[bold]Run {outcome.run_id}: {state.status}[/bold]")
     console.print(f"Completed trials: {len(state.completed_trial_ids)}; pending: {len(state.pending_trial_ids)}")
+    passes = sum(1 for t in state.trials.values() if t.status == "passed")
+    failures = sum(1 for t in state.trials.values() if t.status == "failed")
+    console.print(f"Passes: {passes}  Failures: {failures}")
     console.print(f"Accumulated cost: ${state.actual_cost_usd:.7f}")
+    if state.private_report.generated or state.public_report.generated:
+        console.print(
+            f"Reports -- private: {state.private_report.path or 'n/a'}; "
+            f"public: {state.public_report.path or 'n/a'}"
+        )
     if state.status == "paused":
         console.print(f"Resume with: coldctl eval resume {outcome.run_id} --yes")
     exit_code = 0 if state.status == "completed" else 1
@@ -210,6 +222,7 @@ def eval_resume(
     acknowledge_unestimated_cost: bool = typer.Option(
         False, "--acknowledge-unestimated-cost", help="Required when no cost estimate was available."
     ),
+    verbose: bool = typer.Option(False, "--verbose", help="Show sanitized Harbor output in the progress display."),
     coldstart_dir: Path = typer.Option(DEFAULT_COLDSTART_DIR, "--coldstart-dir", hidden=True),
 ) -> None:
     """Resume an interrupted/paused run from its frozen manifest."""
@@ -237,15 +250,17 @@ def eval_resume(
     repo_root = Path.cwd()
     phase1_db_path = _phase1_db_path(coldstart_dir)
     try:
-        outcome = orchestrator.resume_evaluation(
-            run_id,
-            config,
-            repo_root=repo_root,
-            coldstart_dir=coldstart_dir,
-            phase1_db_path=phase1_db_path,
-            budget_ack=acknowledge_unestimated_cost,
-            harbor_runner=SubprocessHarborRunner(),
-        )
+        with ProgressRenderer(console=console, verbose=verbose) as renderer:
+            outcome = orchestrator.resume_evaluation(
+                run_id,
+                config,
+                repo_root=repo_root,
+                coldstart_dir=coldstart_dir,
+                phase1_db_path=phase1_db_path,
+                budget_ack=acknowledge_unestimated_cost,
+                harbor_runner=SubprocessHarborRunner(),
+                progress_callback=renderer,
+            )
     except orchestrator.ResumeDriftError as exc:
         error_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
@@ -339,6 +354,39 @@ def eval_status(
         f"Reports -- private: {state.private_report.generated} ({state.private_report.path}); "
         f"public: {state.public_report.generated} ({state.public_report.path})"
     )
+
+
+@eval_app.command("regenerate-reports")
+def eval_regenerate_reports(
+    run_id: str = typer.Argument(..., help="Run ID to regenerate Phase 1 reports for."),
+    coldstart_dir: Path = typer.Option(DEFAULT_COLDSTART_DIR, "--coldstart-dir", hidden=True),
+) -> None:
+    """Regenerate this run's public/private reports from its already-ingested
+    trials, without executing Harbor. Scoped to exactly the trials this run
+    produced -- never all history for the same task/system."""
+    try:
+        outcome = orchestrator.regenerate_reports(
+            run_id,
+            repo_root=Path.cwd(),
+            coldstart_dir=coldstart_dir,
+            phase1_db_path=_phase1_db_path(coldstart_dir),
+        )
+    except FileNotFoundError as exc:
+        error_console.print(f"[red]No such run: {run_id}[/red]")
+        raise typer.Exit(1) from exc
+    except orchestrator.ReportMembershipError as exc:
+        error_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if not outcome.private_report.generated and not outcome.public_report.generated:
+        console.print(
+            "[yellow]No ingested trials found for this run; no report generated.[/yellow]"
+        )
+        raise typer.Exit(1)
+
+    console.print(f"Regenerated reports for run {run_id}")
+    console.print(f"  private: {outcome.private_report.generated} ({outcome.private_report.path})")
+    console.print(f"  public:  {outcome.public_report.generated} ({outcome.public_report.path})")
 
 
 __all__ = ["eval_app"]
